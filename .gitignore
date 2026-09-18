@@ -145,3 +145,12 @@ logs/
 
 # Debug files
 debug_html/
+
+venv/
+__pycache__/
+*.pyc
+*.bak-smart*
+patch_frenchio.py
+upgrade_smart_filter_v02.py
+upgrade_smart_filter_v021.py
+test_stream_filter.py

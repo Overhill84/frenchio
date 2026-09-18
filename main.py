@@ -70,7 +70,7 @@ STREMIO_ADDONS_CONFIG = {
 
 # Configuration des fonctionnalités
 QBITTORRENT_ENABLE = os.getenv('QBITTORRENT_ENABLE', 'true').lower() in ('true', '1', 'yes')
-MANIFEST_TITLE_SUFFIX = os.getenv('MANIFEST_TITLE_SUFFIX', '')
+MANIFEST_TITLE_SUFFIX = os.getenv('MANIFEST_TITLE_SUFFIX', '| Fork by Simon')
 MANIFEST_BLURB = os.getenv('MANIFEST_BLURB', '')
 
 # Proxy de streaming qBittorrent : répertoire local où les fichiers sont montés.
@@ -283,6 +283,11 @@ async def handle_stream_no_config(request):
 
 async def handle_stream(request):
     """Gère la recherche de streams"""
+    from stream_filter import (
+        build_compact_title,
+        rank_stream_candidates,
+        ranking_label,
+    )
     config_str = request.match_info.get('config', '')
     config = decode_config(config_str)
     if not config:
@@ -696,10 +701,22 @@ async def handle_stream(request):
             cached_torrents.sort(key=get_sort_key)
             uncached_torrents.sort(key=get_sort_key)
 
+    if config.get('smart_filter_enabled', True):
+        cached_torrents = rank_stream_candidates(
+            cached_torrents,
+            stream_type,
+            config,
+        )
+        uncached_torrents = rank_stream_candidates(
+            uncached_torrents,
+            stream_type,
+            config,
+        )
+
     logging.info(f"Cached: {len(cached_torrents)}, Uncached: {len(uncached_torrents)}")
     
     # 4a. Streams débridés (cachés)
-    for torrent, clean_hash in cached_torrents:
+    for stream_index, (torrent, clean_hash) in enumerate(cached_torrents):
         # Extraire un nom propre pour les trackers UNIT3D (tracker_name = URL)
         raw_tracker = torrent.get('tracker_name', 'UNIT3D')
         if raw_tracker.startswith('http'):
@@ -720,7 +737,7 @@ async def handle_stream(request):
         meta = parse_torrent_name(torrent.get('name', ''))
         
         provider_emoji = "⚡"  # Éclair pour tous les services de débridage
-        title = f"{provider_emoji} {meta['name']}\n{torrent.get('name')}\n💾 {size_str}"
+        title = build_compact_title(torrent, source_prefix.strip(), config)
         
         # URL de résolution (utilise le provider configuré)
         resolve_url = f"{host_url}/{config_str}/resolve/{debrid_provider}/{clean_hash}"
@@ -731,7 +748,7 @@ async def handle_stream(request):
             resolve_url += "?type=movie"
 
         streams.append({
-            "name": f"Frenchio{source_prefix}",
+            "name": ranking_label(stream_index),
             "title": title,
             "url": resolve_url,
             "filename": torrent.get('name', ''),

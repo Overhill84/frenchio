@@ -464,7 +464,96 @@
         .info-box a:hover {
             opacity: 0.9;
         }
-    </style>
+    
+/* SIMON_SMART_FILTER_START */
+.simon-smart-card {
+    width: 100%;
+    box-sizing: border-box;
+    margin: 24px 0;
+    padding: 22px;
+    border-radius: 16px;
+    border: 1px solid rgba(139, 92, 246, .38);
+    background: linear-gradient(145deg, rgba(124, 58, 237, .10), rgba(15, 23, 42, .20));
+}
+.simon-smart-card h3 {
+    margin: 0 0 6px;
+    font-size: 1.1rem;
+}
+.simon-smart-card .simon-smart-intro {
+    margin: 0 0 18px;
+    opacity: .72;
+    font-size: .9rem;
+}
+.simon-smart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 18px;
+}
+.simon-smart-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.simon-smart-field label {
+    font-size: .86rem;
+    font-weight: 600;
+}
+.simon-smart-field input[type="number"],
+.simon-smart-field select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border-radius: 9px;
+    border: 1px solid rgba(148, 163, 184, .28);
+    background: rgba(15, 23, 42, .72);
+    color: inherit;
+}
+.simon-smart-checks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 18px;
+    margin-top: 18px;
+}
+.simon-smart-check {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    cursor: pointer;
+    font-size: .9rem;
+}
+.simon-smart-check input {
+    width: 17px;
+    height: 17px;
+}
+.simon-fork-badge {
+    display: inline-flex;
+    margin-left: 9px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    vertical-align: middle;
+    font-size: .68em;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: .02em;
+    color: #ddd6fe;
+    background: rgba(124, 58, 237, .22);
+    border: 1px solid rgba(167, 139, 250, .35);
+}
+.simon-smart-note {
+    display: block;
+    margin-top: 14px;
+    opacity: .65;
+    font-size: .8rem;
+}
+@media (max-width: 720px) {
+    .simon-smart-grid,
+    .simon-smart-checks {
+        grid-template-columns: 1fr;
+    }
+}
+/* SIMON_SMART_FILTER_END */
+
+</style>
 </head>
 
 <body>
@@ -1335,6 +1424,252 @@
             linkDiv.scrollIntoView({ behavior: 'smooth' });
         }
     </script>
+
+<!-- SIMON_SMART_FILTER_START -->
+<section class="simon-smart-card" id="simon-smart-filter">
+    <h3>✨ Smart Filter</h3>
+    <p class="simon-smart-intro">
+        Sélection, classement et renommage automatique des meilleures releases.
+    </p>
+
+    <div class="simon-smart-grid">
+        <div class="simon-smart-field">
+            <label for="smart_quality_mode">Qualité</label>
+            <select id="smart_quality_mode">
+                <option value="prefer-4k">Préférer 4K</option>
+                <option value="4k-only">4K uniquement</option>
+                <option value="prefer-1080p">Préférer 1080p</option>
+                <option value="any">Indifférent</option>
+            </select>
+        </div>
+
+        <div class="simon-smart-field">
+            <label for="smart_max_results">Nombre max de résultats</label>
+            <input id="smart_max_results" type="number" min="1" max="20" step="1" value="5">
+        </div>
+
+        <div class="simon-smart-field">
+            <label for="smart_max_movie_size_gb">Poids max film (Go)</label>
+            <input id="smart_max_movie_size_gb" type="number" min="0" max="250" step="0.5" value="25">
+        </div>
+
+        <div class="simon-smart-field">
+            <label for="smart_max_series_size_gb">Poids max série / pack (Go)</label>
+            <input id="smart_max_series_size_gb" type="number" min="0" max="250" step="0.5" value="50">
+        </div>
+    </div>
+
+    <div class="simon-smart-checks">
+        <label class="simon-smart-check">
+            <input id="smart_filter_enabled" type="checkbox" checked>
+            Activer Smart Filter
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_prefer_x265" type="checkbox" checked>
+            Préférer x265 / HEVC
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_require_x265" type="checkbox">
+            Exiger x265 / HEVC
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_prefer_eac3" type="checkbox" checked>
+            Préférer EAC3 / DD+
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_require_eac3" type="checkbox">
+            Exiger EAC3 / DD+
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_prefer_hdr" type="checkbox" checked>
+            Préférer HDR / Dolby Vision
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_prefer_webdl" type="checkbox" checked>
+            Préférer WEB-DL à WEBRip
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_prefer_multi" type="checkbox" checked>
+            Préférer MULTI
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_exclude_ad" type="checkbox" checked>
+            Exclure audiodescription (AD)
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_fallback" type="checkbox" checked>
+            Fallback si aucun résultat ne passe
+        </label>
+
+        <label class="simon-smart-check">
+            <input id="smart_show_original_release" type="checkbox">
+            Afficher le nom original de la release
+        </label>
+    </div>
+
+    <small class="simon-smart-note">
+        Un poids maximum à 0 désactive la limite correspondante.
+        Les seeders ne sont pas utilisés car Frenchio ne fournit pas cette donnée.
+    </small>
+</section>
+<!-- SIMON_SMART_FILTER_END -->
+
+
+<script>
+// SIMON_SMART_FILTER_START
+(() => {
+    const defaults = {
+        smart_filter_enabled: true,
+        smart_quality_mode: "prefer-4k",
+        smart_prefer_x265: true,
+        smart_require_x265: false,
+        smart_prefer_eac3: true,
+        smart_require_eac3: false,
+        smart_prefer_hdr: true,
+        smart_prefer_webdl: true,
+        smart_prefer_multi: true,
+        smart_exclude_ad: true,
+        smart_max_movie_size_gb: 25,
+        smart_max_series_size_gb: 50,
+        smart_max_results: 5,
+        smart_fallback: true,
+        smart_show_original_release: false
+    };
+
+    const boolIds = [
+        "smart_filter_enabled",
+        "smart_prefer_x265",
+        "smart_require_x265",
+        "smart_prefer_eac3",
+        "smart_require_eac3",
+        "smart_prefer_hdr",
+        "smart_prefer_webdl",
+        "smart_prefer_multi",
+        "smart_exclude_ad",
+        "smart_fallback",
+        "smart_show_original_release"
+    ];
+
+    function readSmartConfig() {
+        return {
+            smart_filter_enabled: document.getElementById("smart_filter_enabled")?.checked ?? true,
+            smart_quality_mode: document.getElementById("smart_quality_mode")?.value || "prefer-4k",
+            smart_prefer_x265: document.getElementById("smart_prefer_x265")?.checked ?? true,
+            smart_require_x265: document.getElementById("smart_require_x265")?.checked ?? false,
+            smart_prefer_eac3: document.getElementById("smart_prefer_eac3")?.checked ?? true,
+            smart_require_eac3: document.getElementById("smart_require_eac3")?.checked ?? false,
+            smart_prefer_hdr: document.getElementById("smart_prefer_hdr")?.checked ?? true,
+            smart_prefer_webdl: document.getElementById("smart_prefer_webdl")?.checked ?? true,
+            smart_prefer_multi: document.getElementById("smart_prefer_multi")?.checked ?? true,
+            smart_exclude_ad: document.getElementById("smart_exclude_ad")?.checked ?? true,
+            smart_max_movie_size_gb: Number(document.getElementById("smart_max_movie_size_gb")?.value ?? 25),
+            smart_max_series_size_gb: Number(document.getElementById("smart_max_series_size_gb")?.value ?? 50),
+            smart_max_results: Number(document.getElementById("smart_max_results")?.value ?? 5),
+            smart_fallback: document.getElementById("smart_fallback")?.checked ?? true,
+            smart_show_original_release: document.getElementById("smart_show_original_release")?.checked ?? false
+        };
+    }
+
+    function hydrateSmartConfig() {
+        const source = (typeof prefillConfig !== "undefined" && prefillConfig)
+            ? { ...defaults, ...prefillConfig }
+            : defaults;
+
+        const quality = document.getElementById("smart_quality_mode");
+        if (quality) quality.value = source.smart_quality_mode;
+
+        for (const id of boolIds) {
+            const input = document.getElementById(id);
+            if (input) input.checked = Boolean(source[id]);
+        }
+
+        const movieSize = document.getElementById("smart_max_movie_size_gb");
+        const seriesSize = document.getElementById("smart_max_series_size_gb");
+        const maxResults = document.getElementById("smart_max_results");
+
+        if (movieSize) movieSize.value = source.smart_max_movie_size_gb;
+        if (seriesSize) seriesSize.value = source.smart_max_series_size_gb;
+        if (maxResults) maxResults.value = source.smart_max_results;
+    }
+
+    function brandPage() {
+        if (!document.title.includes("Fork by Simon")) {
+            document.title += " | Fork by Simon";
+        }
+
+        const headings = [...document.querySelectorAll("h1, h2")];
+        const heading = headings.find(el => /Frenchio/i.test(el.textContent || ""));
+
+        if (heading && !heading.querySelector(".simon-fork-badge")) {
+            const badge = document.createElement("span");
+            badge.className = "simon-fork-badge";
+            badge.textContent = "Fork by Simon";
+            heading.appendChild(badge);
+        }
+    }
+
+    function placePanel() {
+        const panel = document.getElementById("simon-smart-filter");
+        if (!panel) return;
+
+        const candidates = [...document.querySelectorAll("button, a")];
+        const generateButton = candidates.find(el => {
+            const text = (el.textContent || "").toLowerCase();
+            return text.includes("générer") && (text.includes("stremio") || text.includes("installation"));
+        });
+
+        if (generateButton?.parentElement) {
+            generateButton.parentElement.insertBefore(panel, generateButton);
+            return;
+        }
+
+        const container =
+            document.querySelector(".container") ||
+            document.querySelector("main") ||
+            document.body;
+
+        container.appendChild(panel);
+    }
+
+    // Frenchio encode sa configuration via JSON.stringify avant le Base64.
+    // On enrichit uniquement l'objet principal de configuration.
+    const nativeStringify = JSON.stringify.bind(JSON);
+
+    JSON.stringify = function(value, replacer, space) {
+        if (
+            value &&
+            typeof value === "object" &&
+            !Array.isArray(value) &&
+            (
+                Object.prototype.hasOwnProperty.call(value, "tmdb_key") ||
+                Object.prototype.hasOwnProperty.call(value, "providers_order") ||
+                Object.prototype.hasOwnProperty.call(value, "max_size")
+            )
+        ) {
+            Object.assign(value, readSmartConfig());
+        }
+
+        return nativeStringify(value, replacer, space);
+    };
+
+    document.addEventListener("DOMContentLoaded", () => {
+        brandPage();
+        hydrateSmartConfig();
+        placePanel();
+    });
+})();
+// SIMON_SMART_FILTER_END
+</script>
+
 </body>
 
 </html>
