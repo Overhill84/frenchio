@@ -491,3 +491,28 @@ Pour toute question ou problème :
 ---
 
 **Fait avec ❤️ pour la communauté Stremio francophone**
+
+## Pré-indexation locale des torrents
+
+Frenchio peut conserver les `info_hash` déjà découverts et pré-indexer automatiquement des sorties récentes TMDB. L'objectif est de continuer à proposer des torrents connus lorsqu'un tracker est temporairement indisponible.
+
+Le cache est stocké dans `./data/frenchio.db` via le volume Docker `/app/data`. La dernière configuration de recherche utilisée par Stremio est mémorisée pour le job d'indexation ; les clés de débridage et la configuration qBittorrent ne sont pas persistées par ce mécanisme.
+
+Variables disponibles :
+
+- `INDEXER_ENABLED=true` : active/désactive l'indexeur.
+- `INDEXER_INTERVAL_SECONDS=43200` : intervalle entre deux passages (12 h par défaut).
+- `INDEXER_MAX_MOVIES=20` : nombre maximal de films récents traités par passage.
+- `INDEXER_MAX_SERIES=20` : nombre maximal de séries en cours traitées par passage.
+- `INDEXER_CONCURRENCY=3` : nombre maximal de recherches simultanées.
+- `INDEXER_START_DELAY_SECONDS=60` : délai après le démarrage avant le premier passage.
+- `TORRENT_CACHE_DB=/app/data/frenchio.db` : emplacement de la base SQLite.
+
+Au premier démarrage, ouvre simplement l'addon configuré dans Stremio (manifest ou recherche) afin que Frenchio connaisse les clés TMDB/trackers nécessaires au job. Les recherches interactives enrichissent également le cache.
+
+### Catalogue Stremio « Nouveautés FR / MULTi »
+
+Lorsque l'indexeur est activé, Frenchio expose deux catalogues Stremio (films et séries) basés sur les releases FR/MULTi réellement découvertes par les trackers. Les éléments sont classés selon la première découverte d'un nouveau hash, ce qui permet de faire remonter les nouvelles releases sur l'accueil Stremio.
+
+Le nombre d'éléments affichés peut être réglé avec `CATALOG_LIMIT` (30 par défaut). Après une mise à jour qui ajoute ce catalogue, il est recommandé de réinstaller l'addon dans Stremio afin que son nouveau manifest soit pris en compte immédiatement.
+

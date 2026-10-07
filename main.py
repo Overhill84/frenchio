@@ -29,6 +29,8 @@ import aiofiles
 import asyncio
 from urllib.parse import urlencode, urlsplit, urlparse, quote as urlquote, unquote as urlunquote
 from services.tmdb import TMDBService
+from services.torrent_cache import TorrentCacheService
+from services.indexer import RecentMediaIndexer
 from services.unit3d import Unit3DService
 from services.alldebrid import AllDebridService
 from services.torbox import TorBoxService
@@ -60,7 +62,7 @@ if HTTP_PROXY or HTTPS_PROXY:
         logging.info(f"  HTTPS_PROXY: {HTTPS_PROXY}")
 
 # Version de l'application
-APP_VERSION = "1.5.2"
+APP_VERSION = "1.6.0"
 
 # Stremio Addons Config (signature)
 STREMIO_ADDONS_CONFIG = {
@@ -72,6 +74,7 @@ STREMIO_ADDONS_CONFIG = {
 QBITTORRENT_ENABLE = os.getenv('QBITTORRENT_ENABLE', 'true').lower() in ('true', '1', 'yes')
 MANIFEST_TITLE_SUFFIX = os.getenv('MANIFEST_TITLE_SUFFIX', '| Fork by Simon')
 MANIFEST_BLURB = os.getenv('MANIFEST_BLURB', '')
+CATALOG_LIMIT = max(1, int(os.getenv('CATALOG_LIMIT', '30')))
 
 # Proxy de streaming qBittorrent : répertoire local où les fichiers sont montés.
 # Quand défini, Frenchio sert les fichiers directement en attendant les pièces (évite les zéros).
@@ -208,6 +211,11 @@ async def handle_manifest(request):
     if not config:
         return web.Response(status=400, text="Invalid Config")
 
+    try:
+        await TorrentCacheService().save_config(config)
+    except Exception as e:
+        logging.warning(f"Unable to save indexer configuration from manifest: {e}")
+
     # Construction du nom de l'addon avec suffixe optionnel
     addon_name = "Frenchio"
     if MANIFEST_TITLE_SUFFIX:
@@ -224,8 +232,11 @@ async def handle_manifest(request):
         "icon": "https://i.imgur.com/MgdGxnR.png", # Icône générique ou à changer
         "stremioAddonsConfig": STREMIO_ADDONS_CONFIG,
         "types": ["movie", "series"],
-        "catalogs": [],
-        "resources": ["stream"],
+        "catalogs": [
+            {"type": "movie", "id": "frenchio-new-fr", "name": "Nouveautés FR / MULTi"},
+            {"type": "series", "id": "frenchio-new-fr", "name": "Nouveautés FR / MULTi"},
+        ],
+        "resources": ["stream", "catalog"],
         "idPrefixes": ["tt"],
         "behaviorHints": {
             "configurable": True,
@@ -264,6 +275,50 @@ async def handle_manifest_no_config(request):
     }
     return web.json_response(manifest)
 
+async def handle_catalog(request):
+    """Expose les derniers films/séries FR ou MULTi découverts par l'indexeur."""
+    config_str = request.match_info.get('config', '')
+    config = decode_config(config_str)
+    if not config:
+        return web.json_response({"metas": []})
+
+    media_type = request.match_info.get('type')
+    catalog_id = request.match_info.get('id')
+    if media_type not in ('movie', 'series') or catalog_id != 'frenchio-new-fr':
+        return web.json_response({"metas": []})
+
+    try:
+        rows = await TorrentCacheService().get_recent_french_catalog(media_type, CATALOG_LIMIT)
+    except Exception as e:
+        logging.warning(f"Unable to load Frenchio catalog: {e}")
+        return web.json_response({"metas": []})
+
+    metas = []
+    for row in rows:
+        imdb_id = row.get('imdb_id')
+        if not imdb_id:
+            continue
+        meta = {
+            "id": imdb_id,
+            "type": media_type,
+            "name": row.get('name') or imdb_id,
+        }
+        poster_path = row.get('poster_path')
+        meta["poster"] = (
+            f"https://image.tmdb.org/t/p/w500{poster_path}"
+            if poster_path
+            else f"https://images.metahub.space/poster/medium/{imdb_id}/img"
+        )
+        meta["posterShape"] = "poster"
+        if row.get('release_info'):
+            meta["releaseInfo"] = row['release_info']
+        if row.get('description'):
+            meta["description"] = row['description']
+        metas.append(meta)
+
+    return web.json_response({"metas": metas})
+
+
 async def handle_stream_no_config(request):
     """
     Stream endpoint sans configuration (route /stream/...).
@@ -292,6 +347,14 @@ async def handle_stream(request):
     config = decode_config(config_str)
     if not config:
         return web.json_response({"streams": []})
+
+    # Mémorise la dernière configuration valide pour l'indexeur périodique.
+    # La configuration est déjà transportée côté client dans l'URL Stremio ;
+    # ici elle est conservée localement dans le volume persistant de Frenchio.
+    try:
+        await TorrentCacheService().save_config(config)
+    except Exception as e:
+        logging.warning(f"Unable to save indexer configuration: {e}")
 
     stream_type = request.match_info.get('type')
     stream_id = request.match_info.get('id')
@@ -376,16 +439,9 @@ async def handle_stream(request):
     media_info = None
     needs_media_info = True  # Toujours true car YGG est toujours actif
     
-    if needs_media_info:
-        # On a besoin des détails pour le titre
-        if tmdb_id:
-             async with aiohttp.ClientSession(trust_env=True) as session:
-                url = f"https://api.themoviedb.org/3/{'movie' if stream_type == 'movie' else 'tv'}/{tmdb_id}"
-                params = {"api_key": config['tmdb_key'], "language": "fr-FR"} 
-                # Trackers FR, donc on force le titre FR
-                async with session.get(url, params=params) as resp:
-                    if resp.status == 200:
-                        media_info = await resp.json()
+    if needs_media_info and tmdb_id:
+        # Trackers FR : on privilégie les métadonnées françaises.
+        media_info = await tmdb_service.get_media_details(tmdb_id, stream_type, language='fr-FR')
 
     # 2. Recherche Parallèle
     tasks = []
@@ -512,6 +568,18 @@ async def handle_stream(request):
 
     # Fusion et Déduplication
     all_torrents = unit3d_results + ygg_results + abn_results + c411_results + torr9_results + tr4ker_results
+
+    # Ajoute les torrents pré-indexés. Ils permettent de continuer à proposer
+    # des hashes connus même lorsqu'un tracker est temporairement indisponible.
+    try:
+        cached_results = await TorrentCacheService().get(
+            stream_type, tmdb_id=tmdb_id, imdb_id=imdb_id, season=season, episode=episode
+        )
+        if cached_results:
+            logging.info(f"Loaded {len(cached_results)} torrents from local index")
+            all_torrents.extend(cached_results)
+    except Exception as e:
+        logging.warning(f"Local torrent index read failed: {e}")
     
     # Filtrage par taille si configuré
     max_size_gb = config.get('max_size', 0)
@@ -587,6 +655,25 @@ async def handle_stream(request):
             
     # Liste finale des torrents uniques
     torrents = list(unique_torrents.values())
+
+    # Enrichit aussi l'index lors des recherches interactives Stremio.
+    try:
+        cache_service = TorrentCacheService()
+        if media_info and tmdb_id:
+            await cache_service.upsert_media(
+                media_type=stream_type,
+                tmdb_id=tmdb_id,
+                imdb_id=imdb_id,
+                name=(media_info.get('title') or media_info.get('name') or imdb_id),
+                poster_path=media_info.get('poster_path'),
+                release_info=(media_info.get('release_date') or media_info.get('first_air_date') or '')[:4],
+                description=media_info.get('overview') or '',
+            )
+        await cache_service.upsert_many(
+            stream_type, tmdb_id, imdb_id, season, episode, torrents
+        )
+    except Exception as e:
+        logging.warning(f"Local torrent index write failed: {e}")
     
     if not torrents:
         return web.json_response({"streams": []})
@@ -1187,6 +1274,7 @@ async def get_app():
     app.router.add_get('/{config}/', handle_configure) # Nouvelle route pour config pré-remplie
     app.router.add_get('/{config}/configure', handle_configure) # Nouvelle route pour config pré-remplie
     app.router.add_get('/{config}/manifest.json', handle_manifest)
+    app.router.add_get('/{config}/catalog/{type}/{id}.json', handle_catalog)
     app.router.add_get('/{config}/stream/{type}/{id}.json', handle_stream)
     
     # Routes de résolution (avec config)
@@ -1199,6 +1287,22 @@ async def get_app():
     # Anciennes routes (compatibilité)
     app.router.add_get('/resolve/{service}/{api_key}/{hash}', handle_resolve)
     app.router.add_get('/resolve/{api_key}/{hash}', handle_resolve)
+
+    if os.getenv('INDEXER_ENABLED', 'true').lower() in ('true', '1', 'yes'):
+        async def start_indexer(app):
+            app['recent_media_indexer_task'] = asyncio.create_task(RecentMediaIndexer().run_forever())
+
+        async def stop_indexer(app):
+            task = app.get('recent_media_indexer_task')
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        app.on_startup.append(start_indexer)
+        app.on_cleanup.append(stop_indexer)
     
     return app
 

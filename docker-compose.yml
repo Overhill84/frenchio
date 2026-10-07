@@ -2,7 +2,8 @@ version: '3.8'
 
 services:
   frenchio:
-    image: ghcr.io/aymene69/frenchio:latest
+    build: .
+    image: frenchio-local:latest
     container_name: frenchio-addon
     ports:
       - "7777:7777"
@@ -15,10 +16,20 @@ services:
       # - NO_PROXY=localhost,127.0.0.1
       # Optional: Enable/disable qBittorrent support (default: true)
       - QBITTORRENT_ENABLE=true
+      # Pré-indexation des sorties récentes TMDB (2 passages/jour par défaut)
+      - INDEXER_ENABLED=true
+      - INDEXER_INTERVAL_SECONDS=43200
+      - INDEXER_MAX_MOVIES=20
+      - INDEXER_MAX_SERIES=20
+      - INDEXER_CONCURRENCY=3
+      - CATALOG_LIMIT=30
+      - TORRENT_CACHE_DB=/app/data/frenchio.db
       # Optional: Customize manifest title (e.g., "| ElfHosted")
       # - MANIFEST_TITLE_SUFFIX=| ElfHosted
       # Optional: Add custom HTML/markup blurb to manifest description
       # - MANIFEST_BLURB=<b>Custom message here</b>
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7777/manifest.json')"]
