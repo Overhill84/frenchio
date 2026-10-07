@@ -516,3 +516,11 @@ Lorsque l'indexeur est activé, Frenchio expose deux catalogues Stremio (films e
 
 Le nombre d'éléments affichés peut être réglé avec `CATALOG_LIMIT` (30 par défaut). Après une mise à jour qui ajoute ce catalogue, il est recommandé de réinstaller l'addon dans Stremio afin que son nouveau manifest soit pris en compte immédiatement.
 
+
+### YGG
+
+YGG est désactivé par défaut dans ce fork (`ENABLE_YGG=false`). Les recherches live et l’indexeur automatique n’envoient donc aucune requête à YGG. Il peut être réactivé explicitement avec `ENABLE_YGG=true` si nécessaire.
+
+### Catalogues d’accueil
+
+Les catalogues utilisent désormais des identifiants distincts pour éviter leur déduplication par Stremio : `Nouveautés FR / MULTi - Films` et `Nouveautés FR / MULTi - Séries`. Après cette mise à jour, réinstallez l’addon afin que Stremio recharge le manifest.

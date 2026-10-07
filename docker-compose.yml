@@ -23,6 +23,7 @@ services:
       - INDEXER_MAX_SERIES=20
       - INDEXER_CONCURRENCY=3
       - CATALOG_LIMIT=30
+      - ENABLE_YGG=false
       - TORRENT_CACHE_DB=/app/data/frenchio.db
       # Optional: Customize manifest title (e.g., "| ElfHosted")
       # - MANIFEST_TITLE_SUFFIX=| ElfHosted

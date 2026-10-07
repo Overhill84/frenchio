@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from services.abn import ABNService
 from services.c411 import C411Service
@@ -20,12 +21,14 @@ class TorrentSearchService:
             tasks.append(service.search_all(tmdb_id=tmdb_id, imdb_id=imdb_id, type=media_type, season=season, episode=episode))
             labels.append('unit3d')
 
-        ygg = YggService()
-        if media_type == 'movie':
-            tasks.append(ygg.search_movie(title, year, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
-        else:
-            tasks.append(ygg.search_series(title, season, episode, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
-        labels.append('ygg')
+        enable_ygg = os.getenv('ENABLE_YGG', 'false').lower() in ('true', '1', 'yes')
+        if enable_ygg:
+            ygg = YggService()
+            if media_type == 'movie':
+                tasks.append(ygg.search_movie(title, year, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
+            else:
+                tasks.append(ygg.search_series(title, season, episode, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
+            labels.append('ygg')
 
         if config.get('abn_username') and config.get('abn_password'):
             abn = ABNService(config['abn_username'], config['abn_password'])

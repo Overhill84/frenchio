@@ -62,7 +62,7 @@ if HTTP_PROXY or HTTPS_PROXY:
         logging.info(f"  HTTPS_PROXY: {HTTPS_PROXY}")
 
 # Version de l'application
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 
 # Stremio Addons Config (signature)
 STREMIO_ADDONS_CONFIG = {
@@ -75,6 +75,7 @@ QBITTORRENT_ENABLE = os.getenv('QBITTORRENT_ENABLE', 'true').lower() in ('true',
 MANIFEST_TITLE_SUFFIX = os.getenv('MANIFEST_TITLE_SUFFIX', '| Fork by Simon')
 MANIFEST_BLURB = os.getenv('MANIFEST_BLURB', '')
 CATALOG_LIMIT = max(1, int(os.getenv('CATALOG_LIMIT', '30')))
+ENABLE_YGG = os.getenv('ENABLE_YGG', 'false').lower() in ('true', '1', 'yes')
 
 # Proxy de streaming qBittorrent : répertoire local où les fichiers sont montés.
 # Quand défini, Frenchio sert les fichiers directement en attendant les pièces (évite les zéros).
@@ -222,7 +223,7 @@ async def handle_manifest(request):
         addon_name += f" {MANIFEST_TITLE_SUFFIX}"
     
     # Description de base (le blurb s'affiche dans la page de config)
-    description = "Stream from French Trackers (UNIT3D, YGG, ABN, C411, Torr9) via AllDebrid, TorBox, DebridLink ou qBittorrent"
+    description = "Stream from French Trackers via AllDebrid, TorBox, DebridLink ou qBittorrent"
 
     manifest = {
         "id": "community.aymene69.frenchio",
@@ -233,8 +234,8 @@ async def handle_manifest(request):
         "stremioAddonsConfig": STREMIO_ADDONS_CONFIG,
         "types": ["movie", "series"],
         "catalogs": [
-            {"type": "movie", "id": "frenchio-new-fr", "name": "Nouveautés FR / MULTi"},
-            {"type": "series", "id": "frenchio-new-fr", "name": "Nouveautés FR / MULTi"},
+            {"type": "movie", "id": "frenchio-new-fr-movie", "name": "Nouveautés FR / MULTi - Films"},
+            {"type": "series", "id": "frenchio-new-fr-series", "name": "Nouveautés FR / MULTi - Séries"},
         ],
         "resources": ["stream", "catalog"],
         "idPrefixes": ["tt"],
@@ -284,7 +285,11 @@ async def handle_catalog(request):
 
     media_type = request.match_info.get('type')
     catalog_id = request.match_info.get('id')
-    if media_type not in ('movie', 'series') or catalog_id != 'frenchio-new-fr':
+    valid_catalog_ids = {
+        'movie': {'frenchio-new-fr-movie', 'frenchio-new-fr'},
+        'series': {'frenchio-new-fr-series', 'frenchio-new-fr'},
+    }
+    if media_type not in valid_catalog_ids or catalog_id not in valid_catalog_ids[media_type]:
         return web.json_response({"metas": []})
 
     try:
@@ -435,9 +440,9 @@ async def handle_stream(request):
     tmdb_id = await tmdb_service.get_tmdb_id(imdb_id, stream_type)
     
     # Étape 1.5 : Récupérer Titre/Année pour les trackers qui en ont besoin
-    # YGG est maintenant toujours actif (avec ou sans passkey), donc on a toujours besoin de media_info
+    # Les trackers par titre ont besoin des métadonnées TMDB.
     media_info = None
-    needs_media_info = True  # Toujours true car YGG est toujours actif
+    needs_media_info = True
     
     if needs_media_info and tmdb_id:
         # Trackers FR : on privilégie les métadonnées françaises.
@@ -462,9 +467,8 @@ async def handle_stream(request):
         async def empty(): return []
         tasks.append(empty())
 
-    # Tâche YGG (toujours active, passkey plus nécessaire)
-    ygg_service = YggService()
-    
+    # YGG est désactivé par défaut : le site n'est plus utilisé.
+    # On conserve une tâche vide pour préserver les index des résultats ci-dessous.
     target_title = (media_info.get('title') or media_info.get('name')) if media_info else ""
     original_title = (media_info.get('original_title') or media_info.get('original_name')) if media_info else ""
     year = ""
@@ -472,10 +476,17 @@ async def handle_stream(request):
         date = media_info.get('release_date') or media_info.get('first_air_date')
         year = date.split('-')[0] if date else ""
 
-    if stream_type == 'movie':
-        tasks.append(ygg_service.search_movie(target_title, year, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
-    elif stream_type == 'series':
-        tasks.append(ygg_service.search_series(target_title, season, episode, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
+    if ENABLE_YGG:
+        logging.info("Starting YGG search")
+        ygg_service = YggService()
+        if stream_type == 'movie':
+            tasks.append(ygg_service.search_movie(target_title, year, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
+        elif stream_type == 'series':
+            tasks.append(ygg_service.search_series(target_title, season, episode, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
+    else:
+        logging.info("YGG search disabled")
+        async def empty_ygg(): return []
+        tasks.append(empty_ygg())
 
     # Tâche ABN
     abn_service = None
