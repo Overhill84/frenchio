@@ -24,6 +24,9 @@ services:
       - INDEXER_CONCURRENCY=3
       - CATALOG_LIMIT=30
       - ENABLE_YGG=false
+      # Réponse rapide depuis SQLite; rafraîchissement trackers en arrière-plan après 6 h
+      - CACHE_FAST_PATH=true
+      - CACHE_REFRESH_TTL_SECONDS=21600
       - TORRENT_CACHE_DB=/app/data/frenchio.db
       # Optional: Customize manifest title (e.g., "| ElfHosted")
       # - MANIFEST_TITLE_SUFFIX=| ElfHosted

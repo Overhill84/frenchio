@@ -27,10 +27,12 @@ import aiohttp
 from aiohttp import web
 import aiofiles
 import asyncio
+from datetime import datetime, timezone
 from urllib.parse import urlencode, urlsplit, urlparse, quote as urlquote, unquote as urlunquote
 from services.tmdb import TMDBService
 from services.torrent_cache import TorrentCacheService
 from services.indexer import RecentMediaIndexer
+from services.torrent_search import TorrentSearchService
 from services.unit3d import Unit3DService
 from services.alldebrid import AllDebridService
 from services.torbox import TorBoxService
@@ -62,7 +64,7 @@ if HTTP_PROXY or HTTPS_PROXY:
         logging.info(f"  HTTPS_PROXY: {HTTPS_PROXY}")
 
 # Version de l'application
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.7.0"
 
 # Stremio Addons Config (signature)
 STREMIO_ADDONS_CONFIG = {
@@ -76,6 +78,10 @@ MANIFEST_TITLE_SUFFIX = os.getenv('MANIFEST_TITLE_SUFFIX', '| Fork by Simon')
 MANIFEST_BLURB = os.getenv('MANIFEST_BLURB', '')
 CATALOG_LIMIT = max(1, int(os.getenv('CATALOG_LIMIT', '30')))
 ENABLE_YGG = os.getenv('ENABLE_YGG', 'false').lower() in ('true', '1', 'yes')
+CACHE_FAST_PATH = os.getenv('CACHE_FAST_PATH', 'true').lower() in ('true', '1', 'yes')
+CACHE_REFRESH_TTL_SECONDS = max(300, int(os.getenv('CACHE_REFRESH_TTL_SECONDS', '21600')))
+_BACKGROUND_TASKS = set()
+_CACHE_REFRESH_IN_FLIGHT = set()
 
 # Proxy de streaming qBittorrent : répertoire local où les fichiers sont montés.
 # Quand défini, Frenchio sert les fichiers directement en attendant les pièces (évite les zéros).
@@ -86,6 +92,90 @@ if MANIFEST_TITLE_SUFFIX:
     logging.info(f"Manifest title suffix: {MANIFEST_TITLE_SUFFIX}")
 if MANIFEST_BLURB:
     logging.info(f"Manifest blurb configured")
+
+
+
+def _cache_rows_are_stale(rows):
+    if not rows:
+        return True
+    timestamps = []
+    for row in rows:
+        value = row.get('last_seen_at')
+        if not value:
+            continue
+        try:
+            timestamps.append(datetime.fromisoformat(value))
+        except (TypeError, ValueError):
+            continue
+    if not timestamps:
+        return True
+    latest = max(timestamps)
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - latest.astimezone(timezone.utc)).total_seconds()
+    return age >= CACHE_REFRESH_TTL_SECONDS
+
+
+async def _refresh_media_cache(config, stream_type, tmdb_id, imdb_id, season, episode, media_info):
+    key = (stream_type, tmdb_id, imdb_id, season, episode)
+    try:
+        if not media_info and tmdb_id and config.get('tmdb_key'):
+            tmdb = TMDBService(config['tmdb_key'])
+            media_info = await tmdb.get_media_details(tmdb_id, stream_type, language='fr-FR')
+
+        title = (media_info.get('title') or media_info.get('name') or '') if media_info else ''
+        original_title = (media_info.get('original_title') or media_info.get('original_name') or '') if media_info else ''
+        date = (media_info.get('release_date') or media_info.get('first_air_date') or '') if media_info else ''
+        year = date[:4]
+        if not title:
+            return
+
+        results = await TorrentSearchService().search(
+            config=config,
+            media_type=stream_type,
+            tmdb_id=tmdb_id,
+            imdb_id=imdb_id,
+            title=title,
+            original_title=original_title,
+            year=year,
+            season=season,
+            episode=episode,
+        )
+
+        filtered = []
+        seen = set()
+        for torrent in results:
+            name = torrent.get('name', '')
+            info_hash = (torrent.get('info_hash') or '').strip().lower()
+            if not info_hash or info_hash in seen or not is_video_file(name):
+                continue
+            if not check_title_match(name, title, original_title, year=year, is_movie=(stream_type == 'movie')):
+                continue
+            if stream_type == 'series' and season is not None and not check_season_episode(name, season, episode):
+                continue
+            seen.add(info_hash)
+            filtered.append(torrent)
+
+        cache = TorrentCacheService()
+        await cache.upsert_many(stream_type, tmdb_id, imdb_id, season, episode, filtered)
+        logging.info('Background cache refresh completed for %s %s: %d torrents', stream_type, imdb_id, len(filtered))
+    except Exception:
+        logging.exception('Background cache refresh failed for %s %s', stream_type, imdb_id)
+    finally:
+        _CACHE_REFRESH_IN_FLIGHT.discard(key)
+
+
+def _schedule_media_cache_refresh(config, stream_type, tmdb_id, imdb_id, season, episode, media_info):
+    key = (stream_type, tmdb_id, imdb_id, season, episode)
+    if key in _CACHE_REFRESH_IN_FLIGHT:
+        return
+    _CACHE_REFRESH_IN_FLIGHT.add(key)
+    task = asyncio.create_task(
+        _refresh_media_cache(config, stream_type, tmdb_id, imdb_id, season, episode, media_info)
+    )
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
 
 # ============================================================================
 # Middleware
@@ -434,164 +524,196 @@ async def handle_stream(request):
         return web.json_response({"streams": []})
     
     unit3d_results = []
-    # 1. Info Média et Conversion ID (pour UNIT3D)
-    
-    # Étape 1 : Find by IMDB ID
-    tmdb_id = await tmdb_service.get_tmdb_id(imdb_id, stream_type)
-    
-    # Étape 1.5 : Récupérer Titre/Année pour les trackers qui en ont besoin
-    # Les trackers par titre ont besoin des métadonnées TMDB.
-    media_info = None
-    needs_media_info = True
-    
-    if needs_media_info and tmdb_id:
-        # Trackers FR : on privilégie les métadonnées françaises.
-        media_info = await tmdb_service.get_media_details(tmdb_id, stream_type, language='fr-FR')
+    cache_service = TorrentCacheService()
 
-    # 2. Recherche Parallèle
-    tasks = []
-
-    # Tâche UNIT3D
-    if config.get('trackers'):
-        logging.info(f"Starting UNIT3D search on {len(config['trackers'])} trackers")
-        unit3d_service = Unit3DService(config['trackers'])
-        tasks.append(unit3d_service.search_all(
-            tmdb_id=tmdb_id,
-            imdb_id=imdb_id,
-            type=stream_type,
-            season=season,
-            episode=episode
-        ))
-    else:
-        logging.info("UNIT3D search skipped (no trackers configured)")
-        async def empty(): return []
-        tasks.append(empty())
-
-    # YGG est désactivé par défaut : le site n'est plus utilisé.
-    # On conserve une tâche vide pour préserver les index des résultats ci-dessous.
-    target_title = (media_info.get('title') or media_info.get('name')) if media_info else ""
-    original_title = (media_info.get('original_title') or media_info.get('original_name')) if media_info else ""
-    year = ""
-    if media_info:
-        date = media_info.get('release_date') or media_info.get('first_air_date')
-        year = date.split('-')[0] if date else ""
-
-    if ENABLE_YGG:
-        logging.info("Starting YGG search")
-        ygg_service = YggService()
-        if stream_type == 'movie':
-            tasks.append(ygg_service.search_movie(target_title, year, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
-        elif stream_type == 'series':
-            tasks.append(ygg_service.search_series(target_title, season, episode, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
-    else:
-        logging.info("YGG search disabled")
-        async def empty_ygg(): return []
-        tasks.append(empty_ygg())
-
-    # Tâche ABN
-    abn_service = None
-    if config.get('abn_username') and config.get('abn_password'):
-        logging.info("Starting ABN search")
-        abn_service = ABNService(
-            username=config.get('abn_username'),
-            password=config.get('abn_password')
+    # Chemin rapide : l'index est interrogé par IMDb avant tout appel TMDB ou tracker.
+    # Les lignes du cache ont déjà été validées lors de leur insertion.
+    try:
+        cached_results = await cache_service.get(
+            stream_type, imdb_id=imdb_id, season=season, episode=episode
         )
-        
-        title = media_info.get('title') or media_info.get('name') if media_info else ""
-        original_title = media_info.get('original_title') or media_info.get('original_name') if media_info else ""
+    except Exception as e:
+        logging.warning(f"Local torrent index read failed: {e}")
+        cached_results = []
+
+    use_fast_cache = CACHE_FAST_PATH and bool(cached_results)
+    tmdb_id = None
+    media_info = None
+    target_title = ""
+    original_title = ""
+    year = ""
+
+    if use_fast_cache:
+        tmdb_id = cached_results[0].get('tmdb_id')
+        all_torrents = cached_results
+        logging.info(
+            "Fast cache hit for %s %s: %d torrents (TMDB/trackers skipped for response)",
+            stream_type, imdb_id, len(cached_results),
+        )
+        if _cache_rows_are_stale(cached_results):
+            logging.info("Local cache is stale; scheduling background metadata/tracker refresh")
+            _schedule_media_cache_refresh(
+                dict(config), stream_type, tmdb_id, imdb_id, season, episode, None
+            )
+    else:
+        # 1. Info média / conversion IMDb -> TMDB, uniquement si le cache ne suffit pas.
+        tmdb_id = await tmdb_service.get_tmdb_id(imdb_id, stream_type)
+        if tmdb_id:
+            media_info = await tmdb_service.get_media_details(tmdb_id, stream_type, language='fr-FR')
+
+        target_title = (media_info.get('title') or media_info.get('name')) if media_info else ""
+        original_title = (media_info.get('original_title') or media_info.get('original_name')) if media_info else ""
+        if media_info:
+            date = media_info.get('release_date') or media_info.get('first_air_date')
+            year = date.split('-')[0] if date else ""
+
+        # 2. Recherche Parallèle
+        tasks = []
+
+        # Tâche UNIT3D
+        if config.get('trackers'):
+            logging.info(f"Starting UNIT3D search on {len(config['trackers'])} trackers")
+            unit3d_service = Unit3DService(config['trackers'])
+            tasks.append(unit3d_service.search_all(
+                tmdb_id=tmdb_id,
+                imdb_id=imdb_id,
+                type=stream_type,
+                season=season,
+                episode=episode
+            ))
+        else:
+            logging.info("UNIT3D search skipped (no trackers configured)")
+            async def empty(): return []
+            tasks.append(empty())
+
+        # YGG est désactivé par défaut : le site n'est plus utilisé.
+        # On conserve une tâche vide pour préserver les index des résultats ci-dessous.
+        target_title = (media_info.get('title') or media_info.get('name')) if media_info else ""
+        original_title = (media_info.get('original_title') or media_info.get('original_name')) if media_info else ""
         year = ""
         if media_info:
             date = media_info.get('release_date') or media_info.get('first_air_date')
             year = date.split('-')[0] if date else ""
 
-        if stream_type == 'movie':
-            tasks.append(abn_service.search_movie(title, year, original_title=original_title))
-        elif stream_type == 'series':
-            tasks.append(abn_service.search_series(title, season, episode, original_title=original_title))
-    else:
-        async def empty(): return []
-        tasks.append(empty())
+        if ENABLE_YGG:
+            logging.info("Starting YGG search")
+            ygg_service = YggService()
+            if stream_type == 'movie':
+                tasks.append(ygg_service.search_movie(target_title, year, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
+            elif stream_type == 'series':
+                tasks.append(ygg_service.search_series(target_title, season, episode, original_title=original_title, imdb_id=imdb_id, tmdb_id=tmdb_id))
+        else:
+            logging.info("YGG search disabled")
+            async def empty_ygg(): return []
+            tasks.append(empty_ygg())
 
-    # Tâche C411
-    if config.get('c411_apikey'):
-        logging.info("Starting C411 search")
-        c411_service = C411Service(config.get('c411_apikey'))
+        # Tâche ABN
+        abn_service = None
+        if config.get('abn_username') and config.get('abn_password'):
+            logging.info("Starting ABN search")
+            abn_service = ABNService(
+                username=config.get('abn_username'),
+                password=config.get('abn_password')
+            )
         
-        if stream_type == 'movie':
-            tasks.append(c411_service.search_movie(target_title, year, imdb_id=imdb_id, tmdb_id=tmdb_id))
-        elif stream_type == 'series':
-            tasks.append(c411_service.search_series(target_title, season, episode, imdb_id=imdb_id, tmdb_id=tmdb_id))
-    else:
-        async def empty(): return []
-        tasks.append(empty())
+            title = media_info.get('title') or media_info.get('name') if media_info else ""
+            original_title = media_info.get('original_title') or media_info.get('original_name') if media_info else ""
+            year = ""
+            if media_info:
+                date = media_info.get('release_date') or media_info.get('first_air_date')
+                year = date.split('-')[0] if date else ""
 
-    # Tâche Torr9
-    if config.get('torr9_passkey'):
-        logging.info("Starting Torr9 search")
-        torr9_service = Torr9Service(config.get('torr9_passkey'))
+            if stream_type == 'movie':
+                tasks.append(abn_service.search_movie(title, year, original_title=original_title))
+            elif stream_type == 'series':
+                tasks.append(abn_service.search_series(title, season, episode, original_title=original_title))
+        else:
+            async def empty(): return []
+            tasks.append(empty())
 
-        if stream_type == 'movie':
-            tasks.append(torr9_service.search_movie(target_title, year, imdb_id=imdb_id, tmdb_id=tmdb_id))
-        elif stream_type == 'series':
-            tasks.append(torr9_service.search_series(target_title, season, episode, imdb_id=imdb_id, tmdb_id=tmdb_id))
-    else:
-        async def empty(): return []
-        tasks.append(empty())
+        # Tâche C411
+        if config.get('c411_apikey'):
+            logging.info("Starting C411 search")
+            c411_service = C411Service(config.get('c411_apikey'))
+        
+            if stream_type == 'movie':
+                tasks.append(c411_service.search_movie(target_title, year, imdb_id=imdb_id, tmdb_id=tmdb_id))
+            elif stream_type == 'series':
+                tasks.append(c411_service.search_series(target_title, season, episode, imdb_id=imdb_id, tmdb_id=tmdb_id))
+        else:
+            async def empty(): return []
+            tasks.append(empty())
 
-    # Tâche Tr4ker
-    if config.get('tr4ker_apikey'):
-        logging.info("Starting Tr4ker search")
-        tr4ker_service = Tr4kerService(config.get('tr4ker_apikey'))
+        # Tâche Torr9
+        if config.get('torr9_passkey'):
+            logging.info("Starting Torr9 search")
+            torr9_service = Torr9Service(config.get('torr9_passkey'))
 
-        if stream_type == 'movie':
-            tasks.append(tr4ker_service.search_movie(target_title, year, imdb_id=imdb_id, tmdb_id=tmdb_id))
-        elif stream_type == 'series':
-            tasks.append(tr4ker_service.search_series(target_title, season, episode, imdb_id=imdb_id, tmdb_id=tmdb_id))
-    else:
-        async def empty(): return []
-        tasks.append(empty())
+            if stream_type == 'movie':
+                tasks.append(torr9_service.search_movie(target_title, year, imdb_id=imdb_id, tmdb_id=tmdb_id))
+            elif stream_type == 'series':
+                tasks.append(torr9_service.search_series(target_title, season, episode, imdb_id=imdb_id, tmdb_id=tmdb_id))
+        else:
+            async def empty(): return []
+            tasks.append(empty())
 
-    # Exécution
-    try:
-        results_list = await asyncio.gather(*tasks, return_exceptions=True)
-        unit3d_results = results_list[0] if not isinstance(results_list[0], Exception) else []
-        for t in unit3d_results:
-            t['source'] = 'unit3d'
+        # Tâche Tr4ker
+        if config.get('tr4ker_apikey'):
+            logging.info("Starting Tr4ker search")
+            tr4ker_service = Tr4kerService(config.get('tr4ker_apikey'))
+
+            if stream_type == 'movie':
+                tasks.append(tr4ker_service.search_movie(target_title, year, imdb_id=imdb_id, tmdb_id=tmdb_id))
+            elif stream_type == 'series':
+                tasks.append(tr4ker_service.search_series(target_title, season, episode, imdb_id=imdb_id, tmdb_id=tmdb_id))
+        else:
+            async def empty(): return []
+            tasks.append(empty())
+
+        # Exécution
+        try:
+            results_list = await asyncio.gather(*tasks, return_exceptions=True)
+            unit3d_results = results_list[0] if not isinstance(results_list[0], Exception) else []
+            for t in unit3d_results:
+                t['source'] = 'unit3d'
             
-        def safe(idx):
-            r = results_list[idx] if len(results_list) > idx else []
-            if isinstance(r, Exception):
-                logging.error(f"Task {idx} failed: {r}")
-                return []
-            return r
+            def safe(idx):
+                r = results_list[idx] if len(results_list) > idx else []
+                if isinstance(r, Exception):
+                    logging.error(f"Task {idx} failed: {r}")
+                    return []
+                return r
 
-        ygg_results = safe(1)
-        abn_results = safe(2)
-        c411_results = safe(3)
-        torr9_results = safe(4)
-        tr4ker_results = safe(5)
-    finally:
-        # Fermer la session ABN proprement
-        if abn_service:
-            await abn_service.close()
+            ygg_results = safe(1)
+            abn_results = safe(2)
+            c411_results = safe(3)
+            torr9_results = safe(4)
+            tr4ker_results = safe(5)
+        finally:
+            # Fermer la session ABN proprement
+            if abn_service:
+                await abn_service.close()
 
-    logging.info(f"Results breakdown: UNIT3D={len(unit3d_results)}, YGG={len(ygg_results)}, ABN={len(abn_results)}, C411={len(c411_results)}, Torr9={len(torr9_results)}, Tr4ker={len(tr4ker_results)}")
+        logging.info(f"Results breakdown: UNIT3D={len(unit3d_results)}, YGG={len(ygg_results)}, ABN={len(abn_results)}, C411={len(c411_results)}, Torr9={len(torr9_results)}, Tr4ker={len(tr4ker_results)}")
 
-    # Fusion et Déduplication
-    all_torrents = unit3d_results + ygg_results + abn_results + c411_results + torr9_results + tr4ker_results
+        # Fusion et Déduplication
+        all_torrents = unit3d_results + ygg_results + abn_results + c411_results + torr9_results + tr4ker_results
 
-    # Ajoute les torrents pré-indexés. Ils permettent de continuer à proposer
-    # des hashes connus même lorsqu'un tracker est temporairement indisponible.
-    try:
-        cached_results = await TorrentCacheService().get(
-            stream_type, tmdb_id=tmdb_id, imdb_id=imdb_id, season=season, episode=episode
-        )
-        if cached_results:
-            logging.info(f"Loaded {len(cached_results)} torrents from local index")
-            all_torrents.extend(cached_results)
-    except Exception as e:
-        logging.warning(f"Local torrent index read failed: {e}")
-    
+        # La recherche interactive alimente le cache pour les prochaines ouvertures.
+        try:
+            if media_info and tmdb_id:
+                await cache_service.upsert_media(
+                    media_type=stream_type,
+                    tmdb_id=tmdb_id,
+                    imdb_id=imdb_id,
+                    name=(media_info.get('title') or media_info.get('name') or imdb_id),
+                    poster_path=media_info.get('poster_path'),
+                    release_info=(media_info.get('release_date') or media_info.get('first_air_date') or '')[:4],
+                    description=media_info.get('overview') or '',
+                )
+        except Exception as e:
+            logging.warning(f"Local media index write failed: {e}")
+
     # Filtrage par taille si configuré
     max_size_gb = config.get('max_size', 0)
     if max_size_gb > 0:
@@ -641,7 +763,7 @@ async def handle_stream(request):
             #      pass
 
         # Filtrage par titre et année (Vérification systématique pour éviter les erreurs de mapping des trackers)
-        if stream_type in ('movie', 'series'):
+        if not use_fast_cache and stream_type in ('movie', 'series'):
             if not check_title_match(t.get('name', ''), target_title, original_title, year=year, is_movie=(stream_type == 'movie')):
                 # logging.info(f"Filtered out (Title mismatch): {t.get('name')} for target {target_title}")
                 continue
@@ -649,7 +771,7 @@ async def handle_stream(request):
         # Filtrage Série (SxxExx)
         # Si c'est une série, on vérifie que le titre correspond à la saison/épisode demandé
         # pour éviter d'afficher E03 quand on veut E07 (souvent le cas avec recherche floue)
-        if stream_type == 'series' and season is not None:
+        if not use_fast_cache and stream_type == 'series' and season is not None:
             if not check_season_episode(t.get('name', ''), season, episode):
                 # logging.info(f"Filtered out: {t.get('name')} (Wrong Season/Episode)")
                 continue
@@ -667,25 +789,15 @@ async def handle_stream(request):
     # Liste finale des torrents uniques
     torrents = list(unique_torrents.values())
 
-    # Enrichit aussi l'index lors des recherches interactives Stremio.
-    try:
-        cache_service = TorrentCacheService()
-        if media_info and tmdb_id:
-            await cache_service.upsert_media(
-                media_type=stream_type,
-                tmdb_id=tmdb_id,
-                imdb_id=imdb_id,
-                name=(media_info.get('title') or media_info.get('name') or imdb_id),
-                poster_path=media_info.get('poster_path'),
-                release_info=(media_info.get('release_date') or media_info.get('first_air_date') or '')[:4],
-                description=media_info.get('overview') or '',
+    # Enrichit le cache uniquement après une vraie recherche trackers.
+    if not use_fast_cache:
+        try:
+            await cache_service.upsert_many(
+                stream_type, tmdb_id, imdb_id, season, episode, torrents
             )
-        await cache_service.upsert_many(
-            stream_type, tmdb_id, imdb_id, season, episode, torrents
-        )
-    except Exception as e:
-        logging.warning(f"Local torrent index write failed: {e}")
-    
+        except Exception as e:
+            logging.warning(f"Local torrent index write failed: {e}")
+
     if not torrents:
         return web.json_response({"streams": []})
 

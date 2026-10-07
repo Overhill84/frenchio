@@ -524,3 +524,17 @@ YGG est désactivé par défaut dans ce fork (`ENABLE_YGG=false`). Les recherche
 ### Catalogues d’accueil
 
 Les catalogues utilisent désormais des identifiants distincts pour éviter leur déduplication par Stremio : `Nouveautés FR / MULTi - Films` et `Nouveautés FR / MULTi - Séries`. Après cette mise à jour, réinstallez l’addon afin que Stremio recharge le manifest.
+
+
+### Accélération du chargement des streams
+
+Frenchio peut répondre immédiatement depuis son index SQLite lorsqu'un média a déjà été découvert, sans attendre les trackers distants. Les résultats sont ensuite rafraîchis en arrière-plan lorsque le cache est ancien.
+
+Variables Docker :
+
+```yaml
+CACHE_FAST_PATH=true
+CACHE_REFRESH_TTL_SECONDS=21600  # 6 heures
+```
+
+Mettre `CACHE_FAST_PATH=false` permet de retrouver le comportement historique (recherche trackers synchrone à chaque ouverture).
