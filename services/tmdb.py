@@ -76,3 +76,49 @@ class TMDBService:
                 break
             page += 1
         return results[:limit]
+
+    async def get_recent_netflix(self, media_type, limit=30, days=90):
+        """Recent releases currently available on Netflix in France, not catalog additions."""
+        if media_type not in ('movie', 'series'):
+            return []
+        endpoint_type = 'movie' if media_type == 'movie' else 'tv'
+        providers = await self._get(f'/watch/providers/{endpoint_type}', {
+            'watch_region': 'FR', 'language': 'en-US',
+        })
+        if providers is None:
+            raise RuntimeError('TMDB Netflix providers unavailable')
+        provider_ids = [str(provider['provider_id']) for provider in providers.get('results', [])
+                        if provider.get('provider_name', '').casefold() == 'netflix'
+                        and provider.get('provider_id') is not None]
+        if not provider_ids:
+            return []
+
+        today = date.today()
+        date_field = 'primary_release_date' if media_type == 'movie' else 'first_air_date'
+        params = {
+            'language': 'fr-FR',
+            'watch_region': 'FR',
+            'with_watch_providers': '|'.join(provider_ids),
+            'with_watch_monetization_types': 'flatrate',
+            'include_adult': 'false',
+            'sort_by': f'{date_field}.desc',
+            f'{date_field}.gte': (today - timedelta(days=days)).isoformat(),
+            f'{date_field}.lte': today.isoformat(),
+        }
+        if media_type == 'movie':
+            params['include_video'] = 'false'
+        results = []
+        seen = set()
+        for page in range(1, 6):
+            if len(results) >= limit:
+                break
+            data = await self._get(f'/discover/{endpoint_type}', {**params, 'page': page})
+            if data is None:
+                raise RuntimeError('TMDB Netflix discovery unavailable')
+            for item in data.get('results', []):
+                if item.get('id') and item['id'] not in seen:
+                    seen.add(item['id'])
+                    results.append(item)
+            if page >= data.get('total_pages', 1):
+                break
+        return results[:limit]

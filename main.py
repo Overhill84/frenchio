@@ -30,6 +30,7 @@ import asyncio
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlsplit, urlparse, quote as urlquote, unquote as urlunquote
 from services.tmdb import TMDBService
+from services.netflix_catalog import NetflixCatalogService
 from services.torrent_cache import TorrentCacheService
 from services.indexer import RecentMediaIndexer
 from services.torrent_search import TorrentSearchService
@@ -65,6 +66,7 @@ if HTTP_PROXY or HTTPS_PROXY:
 
 # Version de l'application
 APP_VERSION = "1.7.0"
+NETFLIX_CATALOG_KEY = web.AppKey("netflix_catalog", NetflixCatalogService)
 
 # Stremio Addons Config (signature)
 STREMIO_ADDONS_CONFIG = {
@@ -326,6 +328,8 @@ async def handle_manifest(request):
         "catalogs": [
             {"type": "movie", "id": "frenchio-new-fr-movie", "name": "Nouveautés FR / MULTi - Films"},
             {"type": "series", "id": "frenchio-new-fr-series", "name": "Nouveautés FR / MULTi - Séries"},
+            {"type": "movie", "id": "frenchio-netflix-movie", "name": "Nouveautés Netflix - Films"},
+            {"type": "series", "id": "frenchio-netflix-series", "name": "Nouveautés Netflix - Séries"},
         ],
         "resources": ["stream", "catalog"],
         "idPrefixes": ["tt"],
@@ -375,6 +379,12 @@ async def handle_catalog(request):
 
     media_type = request.match_info.get('type')
     catalog_id = request.match_info.get('id')
+    netflix_ids = {'movie': 'frenchio-netflix-movie', 'series': 'frenchio-netflix-series'}
+    if media_type in netflix_ids and catalog_id == netflix_ids[media_type]:
+        metas = await request.app[NETFLIX_CATALOG_KEY].get_catalog(
+            config.get('tmdb_key'), media_type, limit=CATALOG_LIMIT,
+        )
+        return web.json_response({'metas': metas})
     valid_catalog_ids = {
         'movie': {'frenchio-new-fr-movie', 'frenchio-new-fr'},
         'series': {'frenchio-new-fr-series', 'frenchio-new-fr'},
@@ -1383,6 +1393,7 @@ def _qbit_proxy_url(request, config_str, info_hash, stream_url):
 
 async def get_app():
     app = web.Application(middlewares=[cors_middleware])
+    app[NETFLIX_CATALOG_KEY] = NetflixCatalogService()
     app.router.add_get('/', handle_configure)
     app.router.add_get('/configure', handle_configure)
     app.router.add_get('/manifest.json', handle_manifest_no_config)

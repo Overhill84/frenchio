@@ -565,3 +565,24 @@ elles contiennent potentiellement des sous-titres FR.
 
 Après modification des profils, régénérer le lien et réinstaller l'addon dans
 Stremio pour utiliser la nouvelle configuration.
+
+
+### Nouveautés Netflix
+
+Deux catalogues supplémentaires affichent les films et nouvelles séries sortis
+au cours des 90 derniers jours et disponibles sur Netflix France selon TMDB.
+Ils sont triés par date de sortie décroissante et utilisent la clé TMDB déjà
+configurée. `CATALOG_LIMIT` fixe le nombre maximal de titres par catalogue.
+
+Il s'agit des sorties récentes, pas des dates d'ajout sur Netflix. Pour les
+séries, la date retenue est celle de la première diffusion de la série : les
+nouvelles saisons de séries anciennes ne sont pas incluses dans ce catalogue.
+Les données de disponibilité proviennent de TMDB / JustWatch.
+
+Les résultats sont mis en cache en mémoire pendant six heures ; en cas d'erreur
+TMDB, le dernier résultat disponible est conservé. Ces catalogues de découverte
+ne garantissent pas qu'un stream correspondant aux filtres existe chez les
+trackers. Les filtres films et séries s'appliquent lors de la recherche des streams.
+
+Réinstaller l'addon dans Stremio après la mise à jour pour faire apparaître
+les deux nouvelles rubriques.
