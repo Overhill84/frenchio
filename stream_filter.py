@@ -140,7 +140,7 @@ def parse_release(torrent: dict[str, Any]) -> ParsedRelease:
     french_subtitles = vostfr or _has(
         r"\b(?:SUBFRENCH|SUBFR|FRENCH[ .-]+SUBS?|SUBS?[ .-]+(?:FR|FRENCH)|ST[ .-]+FR)\b", text
     )
-    if _has(r"\b(?:FORCED|FORCES?|FORC?S?)\b", text) and not _has(r"\b(?:FULL|COMPLETS?)\b", text):
+    if _has(r"\b(?:FORCED|FORCES?|FORCÉS?)\b", text) and not _has(r"\b(?:FULL|COMPLETS?)\b", text):
         french_subtitles = False
     vf = vfi or vff or _has(r"\bVF\b", text)
     multi = _has(r"\bMULTI\b", text)

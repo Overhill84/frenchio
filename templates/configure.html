@@ -1568,14 +1568,14 @@
         for (const type of ["movie", "series"]) {
             const panel = template.cloneNode(true);
             panel.id = `${type}-smart-filter`;
-            panel.querySelector("h3").textContent = type === "movie" ? "? Filtres films" : "? Filtres s?ries";
+            panel.querySelector("h3").textContent = type === "movie" ? "✨ Filtres films" : "✨ Filtres séries";
             const languageKey = type === "movie" ? "smart_require_vff" : "smart_require_french_subtitles";
             const label = document.createElement("label");
             label.className = "simon-smart-check";
             const check = document.createElement("input");
             check.type = "checkbox";
             check.id = languageKey;
-            label.append(check, type === "movie" ? " Exiger VFF (mention explicite)" : " Exiger des sous-titres FR complets annonc?s");
+            label.append(check, type === "movie" ? " Exiger VFF (mention explicite)" : " Exiger des sous-titres FR complets annoncés");
             panel.querySelector(".simon-smart-checks").prepend(label);
             const irrelevantSize = type === "movie" ? "smart_max_series_size_gb" : "smart_max_movie_size_gb";
             panel.querySelector(`#${irrelevantSize}`).closest(".simon-smart-field").remove();
@@ -1590,8 +1590,8 @@
                 else input.value = source[key];
             });
             panel.querySelector(".simon-smart-note").textContent = type === "movie"
-                ? "VFF explicite requis : VF, VFI, FRENCH ou MULTI seuls ne suffisent pas. Le repli ne contourne pas cette exigence. Taille ? 0 : sans limite."
-                : "VOSTFR, SUBFRENCH ou mention explicite de sous-titres FR. MULTI seul et sous-titres forc?s seuls sont exclus. Les pistes r?elles ne sont pas v?rifi?es. Le repli ne contourne pas cette exigence. Taille ? 0 : sans limite.";
+                ? "VFF explicite requis : VF, VFI, FRENCH ou MULTI seuls ne suffisent pas. Le repli ne contourne pas cette exigence. Taille à 0 : sans limite."
+                : "VOSTFR, SUBFRENCH ou mention explicite de sous-titres FR. MULTI seul et sous-titres forcés seuls sont exclus. Les pistes réelles ne sont pas vérifiées. Le repli ne contourne pas cette exigence. Taille à 0 : sans limite.";
             template.before(panel);
         }
         template.remove();
