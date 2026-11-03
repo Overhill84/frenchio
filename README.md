@@ -538,3 +538,30 @@ CACHE_REFRESH_TTL_SECONDS=21600  # 6 heures
 ```
 
 Mettre `CACHE_FAST_PATH=false` permet de retrouver le comportement historique (recherche trackers synchrone à chaque ouverture).
+
+
+### Filtres distincts pour les films et les s?ries
+
+La page de configuration propose deux profils ind?pendants : films et s?ries.
+Chaque profil conserve les r?glages de qualit?, codecs, HDR, taille, classement,
+nombre de r?sultats et repli. Les anciens r?glages communs servent de valeurs
+initiales pour les deux profils.
+
+- Films : VFF explicite exig? par d?faut. VF, VFI, FRENCH ou MULTI seuls ne
+  suffisent pas ? identifier une version fran?aise de France.
+- S?ries : sous-titres FR complets annonc?s exig?s par d?faut (VOSTFR,
+  SUBFRENCH, SUBFR ou mention explicite ?quivalente). MULTI seul et les
+  sous-titres forc?s seuls ne suffisent pas.
+
+Ces exigences de langue restent actives lorsque le classement Smart Filter est
+ d?sactiv? et ne sont jamais assouplies par le repli. Elles peuvent ?tre d?coch?es
+s?par?ment dans chaque profil. En l'absence de release admissible, aucun stream
+n'est propos?.
+
+La d?tection repose sur le nom de la release : Frenchio n'inspecte pas les pistes
+r?elles des fichiers. La pr?sence effective de sous-titres FR ne peut donc pas
+?tre garantie. Les releases sans indication explicite sont ?cart?es, m?me si
+elles contiennent potentiellement des sous-titres FR.
+
+Apr?s modification des profils, r?g?n?rer le lien et r?installer l'addon dans
+Stremio pour utiliser la nouvelle configuration.

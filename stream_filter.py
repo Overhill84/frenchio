@@ -20,11 +20,14 @@ class ParsedRelease:
     vfi: bool
     vff: bool
     vostfr: bool
+    french_subtitles: bool
     audio_description: bool
     size_gb: float | None
 
 
 DEFAULTS = {
+    "smart_require_vff": True,
+    "smart_require_french_subtitles": True,
     "smart_filter_enabled": True,
     "smart_quality_mode": "prefer-4k",
     "smart_prefer_x265": True,
@@ -41,6 +44,20 @@ DEFAULTS = {
     "smart_fallback": True,
     "smart_show_original_release": False,
 }
+
+
+def media_filter_config(config: dict[str, Any], stream_type: str) -> dict[str, Any]:
+    """Old shared settings remain the fallback for each independent profile."""
+    profile = config.get(f"{stream_type}_filters")
+    return {**config, **(profile if isinstance(profile, dict) else {})}
+
+
+def _passes_language_filters(parsed: ParsedRelease, stream_type: str, config: dict[str, Any]) -> bool:
+    if stream_type == "movie" and _config(config, "smart_require_vff") and not parsed.vff:
+        return False
+    if stream_type == "series" and _config(config, "smart_require_french_subtitles") and not parsed.french_subtitles:
+        return False
+    return True
 
 
 def _config(config: dict[str, Any], key: str) -> Any:
@@ -119,6 +136,12 @@ def parse_release(torrent: dict[str, Any]) -> ParsedRelease:
     vfi = _has(r"\bVFI\b", text)
     vff = _has(r"\bVFF\b", text)
     vostfr = _has(r"\bVOSTFR\b", text)
+    # MULTI says nothing about subtitle languages. Forced-only tags are insufficient.
+    french_subtitles = vostfr or _has(
+        r"\b(?:SUBFRENCH|SUBFR|FRENCH[ .-]+SUBS?|SUBS?[ .-]+(?:FR|FRENCH)|ST[ .-]+FR)\b", text
+    )
+    if _has(r"\b(?:FORCED|FORCES?|FORC?S?)\b", text) and not _has(r"\b(?:FULL|COMPLETS?)\b", text):
+        french_subtitles = False
     vf = vfi or vff or _has(r"\bVF\b", text)
     multi = _has(r"\bMULTI\b", text)
 
@@ -141,6 +164,7 @@ def parse_release(torrent: dict[str, Any]) -> ParsedRelease:
         vfi=vfi,
         vff=vff,
         vostfr=vostfr,
+        french_subtitles=french_subtitles,
         audio_description=audio_description,
         size_gb=_size_gb(torrent),
     )
@@ -246,7 +270,9 @@ def rank_stream_candidates(
     stream_type: str,
     config: dict[str, Any],
 ) -> list[tuple[dict[str, Any], str]]:
-    if not items:
+    config = media_filter_config(config, stream_type)
+    items = [(t, h) for t, h in items if _passes_language_filters(parse_release(t), stream_type, config)]
+    if not items or not _config(config, "smart_filter_enabled"):
         return items
 
     parsed_items = [(torrent, info_hash, parse_release(torrent)) for torrent, info_hash in items]

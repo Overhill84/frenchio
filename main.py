@@ -437,6 +437,7 @@ async def handle_stream(request):
         build_compact_title,
         rank_stream_candidates,
         ranking_label,
+        media_filter_config,
     )
     config_str = request.match_info.get('config', '')
     config = decode_config(config_str)
@@ -452,6 +453,7 @@ async def handle_stream(request):
         logging.warning(f"Unable to save indexer configuration: {e}")
 
     stream_type = request.match_info.get('type')
+    config = media_filter_config(config, stream_type)
     stream_id = request.match_info.get('id')
 
     # Parsing ID (tt1234567 ou tt1234567:1:2)
@@ -911,17 +913,8 @@ async def handle_stream(request):
             cached_torrents.sort(key=get_sort_key)
             uncached_torrents.sort(key=get_sort_key)
 
-    if config.get('smart_filter_enabled', True):
-        cached_torrents = rank_stream_candidates(
-            cached_torrents,
-            stream_type,
-            config,
-        )
-        uncached_torrents = rank_stream_candidates(
-            uncached_torrents,
-            stream_type,
-            config,
-        )
+    cached_torrents = rank_stream_candidates(cached_torrents, stream_type, config)
+    uncached_torrents = rank_stream_candidates(uncached_torrents, stream_type, config)
 
     logging.info(f"Cached: {len(cached_torrents)}, Uncached: {len(uncached_torrents)}")
     

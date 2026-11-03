@@ -1359,6 +1359,7 @@
                 .map(li => li.getAttribute('data-id'));
 
             const config = {
+                ...window.readMediaFilters(),
                 tmdb_key: tmdbKey,
                 alldebrid_key: alldebridKey,
                 torbox_key: torboxKey,
@@ -1545,60 +1546,55 @@
         smart_show_original_release: false
     };
 
-    const boolIds = [
-        "smart_filter_enabled",
-        "smart_prefer_x265",
-        "smart_require_x265",
-        "smart_prefer_eac3",
-        "smart_require_eac3",
-        "smart_prefer_hdr",
-        "smart_prefer_webdl",
-        "smart_prefer_multi",
-        "smart_exclude_ad",
-        "smart_fallback",
-        "smart_show_original_release"
-    ];
+    defaults.smart_require_vff = true;
+    defaults.smart_require_french_subtitles = true;
 
-    function readSmartConfig() {
-        return {
-            smart_filter_enabled: document.getElementById("smart_filter_enabled")?.checked ?? true,
-            smart_quality_mode: document.getElementById("smart_quality_mode")?.value || "prefer-4k",
-            smart_prefer_x265: document.getElementById("smart_prefer_x265")?.checked ?? true,
-            smart_require_x265: document.getElementById("smart_require_x265")?.checked ?? false,
-            smart_prefer_eac3: document.getElementById("smart_prefer_eac3")?.checked ?? true,
-            smart_require_eac3: document.getElementById("smart_require_eac3")?.checked ?? false,
-            smart_prefer_hdr: document.getElementById("smart_prefer_hdr")?.checked ?? true,
-            smart_prefer_webdl: document.getElementById("smart_prefer_webdl")?.checked ?? true,
-            smart_prefer_multi: document.getElementById("smart_prefer_multi")?.checked ?? true,
-            smart_exclude_ad: document.getElementById("smart_exclude_ad")?.checked ?? true,
-            smart_max_movie_size_gb: Number(document.getElementById("smart_max_movie_size_gb")?.value ?? 25),
-            smart_max_series_size_gb: Number(document.getElementById("smart_max_series_size_gb")?.value ?? 50),
-            smart_max_results: Number(document.getElementById("smart_max_results")?.value ?? 5),
-            smart_fallback: document.getElementById("smart_fallback")?.checked ?? true,
-            smart_show_original_release: document.getElementById("smart_show_original_release")?.checked ?? false
-        };
-    }
+    window.readMediaFilters = function() {
+        const result = {};
+        for (const type of ["movie", "series"]) {
+            const profile = {};
+            document.querySelectorAll(`#${type}-smart-filter [data-filter-key]`).forEach(input => {
+                profile[input.dataset.filterKey] = input.type === "checkbox" ? input.checked
+                    : input.type === "number" ? Number(input.value) : input.value;
+            });
+            result[`${type}_filters`] = profile;
+        }
+        return result;
+    };
 
     function hydrateSmartConfig() {
-        const source = (typeof prefillConfig !== "undefined" && prefillConfig)
-            ? { ...defaults, ...prefillConfig }
-            : defaults;
-
-        const quality = document.getElementById("smart_quality_mode");
-        if (quality) quality.value = source.smart_quality_mode;
-
-        for (const id of boolIds) {
-            const input = document.getElementById(id);
-            if (input) input.checked = Boolean(source[id]);
+        const template = document.getElementById("simon-smart-filter");
+        const saved = typeof prefillConfig !== "undefined" && prefillConfig ? prefillConfig : {};
+        for (const type of ["movie", "series"]) {
+            const panel = template.cloneNode(true);
+            panel.id = `${type}-smart-filter`;
+            panel.querySelector("h3").textContent = type === "movie" ? "? Filtres films" : "? Filtres s?ries";
+            const languageKey = type === "movie" ? "smart_require_vff" : "smart_require_french_subtitles";
+            const label = document.createElement("label");
+            label.className = "simon-smart-check";
+            const check = document.createElement("input");
+            check.type = "checkbox";
+            check.id = languageKey;
+            label.append(check, type === "movie" ? " Exiger VFF (mention explicite)" : " Exiger des sous-titres FR complets annonc?s");
+            panel.querySelector(".simon-smart-checks").prepend(label);
+            const irrelevantSize = type === "movie" ? "smart_max_series_size_gb" : "smart_max_movie_size_gb";
+            panel.querySelector(`#${irrelevantSize}`).closest(".simon-smart-field").remove();
+            const source = { ...defaults, ...saved, ...(saved[`${type}_filters`] || {}) };
+            panel.querySelectorAll("input, select").forEach(input => {
+                const key = input.id;
+                input.dataset.filterKey = key;
+                input.id = `${type}_${key}`;
+                const fieldLabel = panel.querySelector(`label[for="${key}"]`);
+                if (fieldLabel) fieldLabel.htmlFor = input.id;
+                if (input.type === "checkbox") input.checked = Boolean(source[key]);
+                else input.value = source[key];
+            });
+            panel.querySelector(".simon-smart-note").textContent = type === "movie"
+                ? "VFF explicite requis : VF, VFI, FRENCH ou MULTI seuls ne suffisent pas. Le repli ne contourne pas cette exigence. Taille ? 0 : sans limite."
+                : "VOSTFR, SUBFRENCH ou mention explicite de sous-titres FR. MULTI seul et sous-titres forc?s seuls sont exclus. Les pistes r?elles ne sont pas v?rifi?es. Le repli ne contourne pas cette exigence. Taille ? 0 : sans limite.";
+            template.before(panel);
         }
-
-        const movieSize = document.getElementById("smart_max_movie_size_gb");
-        const seriesSize = document.getElementById("smart_max_series_size_gb");
-        const maxResults = document.getElementById("smart_max_results");
-
-        if (movieSize) movieSize.value = source.smart_max_movie_size_gb;
-        if (seriesSize) seriesSize.value = source.smart_max_series_size_gb;
-        if (maxResults) maxResults.value = source.smart_max_results;
+        template.remove();
     }
 
     function brandPage() {
@@ -1617,8 +1613,8 @@
         }
     }
 
-    function placePanel() {
-        const panel = document.getElementById("simon-smart-filter");
+    function placePanel(type) {
+        const panel = document.getElementById(`${type}-smart-filter`);
         if (!panel) return;
 
         const candidates = [...document.querySelectorAll("button, a")];
@@ -1640,31 +1636,11 @@
         container.appendChild(panel);
     }
 
-    // Frenchio encode sa configuration via JSON.stringify avant le Base64.
-    // On enrichit uniquement l'objet principal de configuration.
-    const nativeStringify = JSON.stringify.bind(JSON);
-
-    JSON.stringify = function(value, replacer, space) {
-        if (
-            value &&
-            typeof value === "object" &&
-            !Array.isArray(value) &&
-            (
-                Object.prototype.hasOwnProperty.call(value, "tmdb_key") ||
-                Object.prototype.hasOwnProperty.call(value, "providers_order") ||
-                Object.prototype.hasOwnProperty.call(value, "max_size")
-            )
-        ) {
-            Object.assign(value, readSmartConfig());
-        }
-
-        return nativeStringify(value, replacer, space);
-    };
-
     document.addEventListener("DOMContentLoaded", () => {
         brandPage();
         hydrateSmartConfig();
-        placePanel();
+        placePanel("movie");
+        placePanel("series");
     });
 })();
 // SIMON_SMART_FILTER_END
