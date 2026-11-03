@@ -55,7 +55,8 @@ def media_filter_config(config: dict[str, Any], stream_type: str) -> dict[str, A
 def _passes_language_filters(parsed: ParsedRelease, stream_type: str, config: dict[str, Any]) -> bool:
     if stream_type == "movie" and _config(config, "smart_require_vff") and not parsed.vff:
         return False
-    if stream_type == "series" and _config(config, "smart_require_french_subtitles") and not parsed.french_subtitles:
+    # Keep the existing config key so installed series profiles gain the corrected rule.
+    if stream_type == "series" and _config(config, "smart_require_french_subtitles") and not (parsed.vff or parsed.french_subtitles):
         return False
     return True
 

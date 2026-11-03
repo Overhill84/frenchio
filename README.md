@@ -549,9 +549,10 @@ initiales pour les deux profils.
 
 - Films : VFF explicite exigé par défaut. VF, VFI, FRENCH ou MULTI seuls ne
   suffisent pas à identifier une version française de France.
-- Séries : sous-titres FR complets annoncés exigés par défaut (VOSTFR,
-  SUBFRENCH, SUBFR ou mention explicite équivalente). MULTI seul et les
-  sous-titres forcés seuls ne suffisent pas.
+- Séries : VFF ou sous-titres FR complets annoncés exigés par défaut
+  (VOSTFR, SUBFRENCH, SUBFR ou mention explicite équivalente). Une release VFF
+  est acceptée sans sous-titres. VF, VFI, VFQ ou MULTI seuls et les sous-titres
+  forcés seuls ne suffisent pas.
 
 Ces exigences de langue restent actives lorsque le classement Smart Filter est
  désactivé et ne sont jamais assouplies par le repli. Elles peuvent être décochées

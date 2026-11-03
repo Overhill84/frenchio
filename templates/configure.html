@@ -1575,7 +1575,7 @@
             const check = document.createElement("input");
             check.type = "checkbox";
             check.id = languageKey;
-            label.append(check, type === "movie" ? " Exiger VFF (mention explicite)" : " Exiger des sous-titres FR complets annoncés");
+            label.append(check, type === "movie" ? " Exiger VFF (mention explicite)" : " Exiger VFF ou sous-titres FR complets annoncés");
             panel.querySelector(".simon-smart-checks").prepend(label);
             const irrelevantSize = type === "movie" ? "smart_max_series_size_gb" : "smart_max_movie_size_gb";
             panel.querySelector(`#${irrelevantSize}`).closest(".simon-smart-field").remove();
@@ -1591,7 +1591,7 @@
             });
             panel.querySelector(".simon-smart-note").textContent = type === "movie"
                 ? "VFF explicite requis : VF, VFI, FRENCH ou MULTI seuls ne suffisent pas. Le repli ne contourne pas cette exigence. Taille à 0 : sans limite."
-                : "VOSTFR, SUBFRENCH ou mention explicite de sous-titres FR. MULTI seul et sous-titres forcés seuls sont exclus. Les pistes réelles ne sont pas vérifiées. Le repli ne contourne pas cette exigence. Taille à 0 : sans limite.";
+                : "VFF accepté sans sous-titres FR. Sinon, sous-titres FR complets annoncés requis (VOSTFR, SUBFRENCH...). VF, VFI, VFQ ou MULTI seuls ne suffisent pas. Les pistes réelles ne sont pas vérifiées. Le repli ne contourne pas cette exigence. Taille à 0 : sans limite.";
             template.before(panel);
         }
         template.remove();
