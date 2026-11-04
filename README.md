@@ -580,6 +580,9 @@ séries, la date retenue est celle de la première diffusion de la série : les
 nouvelles saisons de séries anciennes ne sont pas incluses dans ce catalogue.
 Les données de disponibilité proviennent de TMDB / JustWatch.
 
+Les productions dont le pays d'origine TMDB inclut l'Inde (`IN`) ou la Chine
+(`CN`) sont exclues des deux catalogues Netflix, y compris les coproductions.
+
 Les résultats sont mis en cache en mémoire pendant six heures ; en cas d'erreur
 TMDB, le dernier résultat disponible est conservé. Ces catalogues de découverte
 ne garantissent pas qu'un stream correspondant aux filtres existe chez les

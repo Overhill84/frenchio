@@ -1,3 +1,4 @@
+import asyncio
 import aiohttp
 import logging
 from datetime import date, timedelta
@@ -109,15 +110,35 @@ class TMDBService:
             params['include_video'] = 'false'
         results = []
         seen = set()
+        semaphore = asyncio.Semaphore(5)
+
+        async def allowed_origin(item):
+            countries = item.get('origin_country')
+            if countries is None:
+                async with semaphore:
+                    details = await self.get_media_details(item['id'], media_type)
+                if details is None:
+                    raise RuntimeError('TMDB Netflix origin lookup unavailable')
+                countries = details.get('origin_country')
+                if not countries:
+                    countries = [country.get('iso_3166_1')
+                                 for country in details.get('production_countries', [])]
+            return not {'IN', 'CN'}.intersection(countries)
+
         for page in range(1, 6):
             if len(results) >= limit:
                 break
             data = await self._get(f'/discover/{endpoint_type}', {**params, 'page': page})
             if data is None:
                 raise RuntimeError('TMDB Netflix discovery unavailable')
+            candidates = []
             for item in data.get('results', []):
                 if item.get('id') and item['id'] not in seen:
                     seen.add(item['id'])
+                    candidates.append(item)
+            allowed = await asyncio.gather(*(allowed_origin(item) for item in candidates))
+            for item, keep in zip(candidates, allowed):
+                if keep:
                     results.append(item)
             if page >= data.get('total_pages', 1):
                 break

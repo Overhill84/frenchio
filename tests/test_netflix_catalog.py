@@ -17,6 +17,7 @@ class NetflixCatalogTest(unittest.IsolatedAsyncioTestCase):
         ]:
             with self.subTest(media_type=media_type):
                 tmdb = TMDBService('test')
+                tmdb.get_media_details = AsyncMock(return_value={'origin_country': ['US']})
                 tmdb._get = AsyncMock(side_effect=[
                     {'results': [{'provider_id': 8, 'provider_name': 'Netflix'},
                                  {'provider_id': 9, 'provider_name': 'Other'}]},
@@ -34,12 +35,42 @@ class NetflixCatalogTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_discovery_paginates_and_deduplicates(self):
         tmdb = TMDBService('test')
+        tmdb.get_media_details = AsyncMock(return_value={'origin_country': ['US']})
         tmdb._get = AsyncMock(side_effect=[
             {'results': [{'provider_id': 8, 'provider_name': 'Netflix'}]},
             {'results': [{'id': 1}], 'total_pages': 2},
             {'results': [{'id': 1}, {'id': 2}], 'total_pages': 2},
         ])
         self.assertEqual(await tmdb.get_recent_netflix('movie', limit=2), [{'id': 1}, {'id': 2}])
+
+    async def test_excluded_origins_are_replaced_from_next_page(self):
+        for media_type in ('movie', 'series'):
+            with self.subTest(media_type=media_type):
+                tmdb = TMDBService('test')
+                tmdb._get = AsyncMock(side_effect=[
+                    {'results': [{'provider_id': 8, 'provider_name': 'Netflix'}]},
+                    {'results': [{'id': 1, 'origin_country': ['IN']},
+                                 {'id': 2, 'origin_country': ['CN', 'US']},
+                                 {'id': 3}], 'total_pages': 2},
+                    {'results': [{'id': 4, 'origin_country': ['FR']},
+                                 {'id': 5, 'origin_country': ['JP']}], 'total_pages': 2},
+                ])
+                tmdb.get_media_details = AsyncMock(return_value={
+                    'production_countries': [{'iso_3166_1': 'IN'}],
+                })
+                result = await tmdb.get_recent_netflix(media_type, limit=2)
+                self.assertEqual([item['id'] for item in result], [4, 5])
+                tmdb.get_media_details.assert_awaited_once_with(3, media_type)
+
+    async def test_origin_lookup_failure_does_not_silently_include_titles(self):
+        tmdb = TMDBService('test')
+        tmdb._get = AsyncMock(side_effect=[
+            {'results': [{'provider_id': 8, 'provider_name': 'Netflix'}]},
+            {'results': [{'id': 1}], 'total_pages': 1},
+        ])
+        tmdb.get_media_details = AsyncMock(return_value=None)
+        with self.assertRaises(RuntimeError):
+            await tmdb.get_recent_netflix('movie')
 
     async def test_metadata_cache_is_scoped_by_credentials_and_type(self):
         with patch('services.netflix_catalog.TMDBService') as factory:
