@@ -333,14 +333,16 @@ def build_compact_title(
 
     if parsed.multi:
         values.append("MULTI")
+    if parsed.vff:
+        values.append("VFF")
     elif parsed.vfi:
         values.append("VFI")
-    elif parsed.vff:
-        values.append("VFF")
     elif parsed.vf:
         values.append("VF")
-    elif parsed.vostfr:
+    if parsed.vostfr:
         values.append("VOSTFR")
+    elif parsed.french_subtitles:
+        values.append("Sous-titres FR")
 
     values.append(_format_size(parsed.size_gb))
 
